@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <alsa/asoundlib.h>
+#include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -25,7 +26,7 @@ static std::vector<uint8_t> capture_buffer;
 static void setup_capture(char const* capture_handle_name)
 {
   int err;
-  uint32_t sample_rate = 441000;
+  uint32_t sample_rate = 44100;
   snd_pcm_hw_params_t* params;
   snd_pcm_format_t fmt = SND_PCM_FORMAT_S16_LE;
 
@@ -52,8 +53,10 @@ int main(int argc, char* argv[])
 {
   int err;
   int server_fd;
-  int port = 10001;
+  int port = static_cast<int>(strtol(argv[1], NULL, 10));
   struct sockaddr_in server_addr;
+
+  printf("port:%d\n", port);
 
   std::string capture_handle_name = "hw:1,0";
 
@@ -68,7 +71,7 @@ int main(int argc, char* argv[])
   err = bind(server_fd, reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr));
   if (err < 0)
   {
-    fprintf(stderr, "failed to bind listen socket. %s", strerror(err));
+    fprintf(stderr, "failed to bind listen socket. %s", strerror(errno));
     exit(1);
   }
 
@@ -88,6 +91,8 @@ int main(int argc, char* argv[])
       continue;
     }
 
+    printf("accepted connection\n");
+
     while (true)
     {
       // std::fill(capture_buffer.begin(), capture_buffer.end(), 0);
@@ -98,21 +103,54 @@ int main(int argc, char* argv[])
 	exit(1);
       }
 
-      ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
-      if (n != static_cast<ssize_t>(capture_buffer.size()))
+      fd_set read_fds;
+      fd_set write_fds;
+      fd_set err_fds;
+      FD_ZERO(&write_fds);
+      FD_ZERO(&read_fds);
+      FD_ZERO(&err_fds);
+      FD_SET(client_fd, &read_fds);
+      FD_SET(client_fd, &write_fds);
+      FD_SET(client_fd, &err_fds);
+
+      struct timeval timeout;
+      timeout.tv_sec = 1;
+      timeout.tv_usec = 0;
+
+      int ret = select(client_fd + 1, &read_fds, &write_fds, &err_fds, &timeout);
+      if (ret == 0)
+	continue;
+
+      if (FD_ISSET(client_fd, &err_fds))
       {
-	if (n == -1)
-	{
-	  fprintf(stderr, "error sending on socket. %s\n", strerror(err));
-	}
-	else
-	{
-	  fprintf(stderr, "failed to send all audio data. only sent %d of %d bytes.\n",
-	      static_cast<int>(n), static_cast<int>(capture_buffer.size()));
-	}
+	fprintf(stderr, "socket error\n");
+	close(client_fd);
 	break;
       }
 
+      if (FD_ISSET(client_fd, &write_fds))
+      {
+	ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
+	if (n != static_cast<ssize_t>(capture_buffer.size()))
+	{
+	  if (n == -1)
+	  {
+	    fprintf(stderr, "error sending on socket. %s\n", strerror(errno));
+	  }
+	  else
+	  {
+	    fprintf(stderr, "failed to send all audio data. only sent %d of %d bytes.\n",
+		static_cast<int>(n), static_cast<int>(capture_buffer.size()));
+	  }
+	  close(client_fd);
+	  break;
+	}
+      }
+
+      if (FD_ISSET(client_fd, &read_fds))
+      {
+	// TODO: read from socket, write to playback device
+      }
 
       #if 0
       for (int i = 0; i < capture_buffer.size(); ++i)
