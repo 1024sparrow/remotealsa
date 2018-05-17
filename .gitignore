@@ -1,3 +1,7 @@
 build/
 .qmake.stash
-xCamSoundTest
+soundtest
+*.o
+moc_*.cpp
+Makefile
+server/sndserver
