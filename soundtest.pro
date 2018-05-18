@@ -7,5 +7,7 @@ QT += multimedia
 TARGET = soundtest
 TEMPLATE = app
 
-SOURCES += main.cpp mainwindow.cpp
-HEADERS  += mainwindow.h
+SOURCES += main.cpp mainwindow.cpp \
+    logwindow.cpp
+HEADERS  += mainwindow.h \
+    logwindow.h
