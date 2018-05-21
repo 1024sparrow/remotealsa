@@ -14,6 +14,11 @@
 static int capture_buffer_frames = 128;
 static snd_pcm_t* capture_handle = NULL;
 static std::vector<uint8_t> capture_buffer;
+static snd_pcm_t* playback_handle = NULL;
+static std::vector<uint8_t> playback_buffer;
+static int playback_buffer_size;
+static int playback_buffer_read;
+static snd_pcm_uframes_t playback_frames;
 
 #define D(FUNC) if ((err = FUNC) < 0) {\
     fprintf(stderr, "[%s:%d] -- %s (%d):%s\n", __FILE__, (__LINE__ - 1), #FUNC, err, snd_strerror(err)); \
@@ -46,6 +51,29 @@ static void setup_capture(char const* capture_handle_name)
   const uint32_t n = (capture_buffer_frames * (snd_pcm_format_width(fmt) / 8) * 2);
   capture_buffer.reserve(n);
   capture_buffer.resize(n);
+}
+
+static void setup_playback(char const* playback_handle_name)
+{
+  int err;
+  int num_channels = 2;
+  uint32_t period_time;
+  uint32_t sample_rate = 44100;
+  snd_pcm_hw_params_t* params;
+  snd_pcm_uframes_t playback_frames;
+
+  D( snd_pcm_open(&playback_handle, playback_handle_name, SND_PCM_STREAM_PLAYBACK, 0) );
+  snd_pcm_hw_params_alloca(&params);
+  D( snd_pcm_hw_params_set_format(playback_handle, params, SND_PCM_FORMAT_S16_LE) );
+  D( snd_pcm_hw_params_set_channels(playback_handle, params, num_channels) );
+  D( snd_pcm_hw_params_set_rate_near(playback_handle, params, &sample_rate, 0) );
+  D( snd_pcm_hw_params(playback_handle, params) );
+  D( snd_pcm_hw_params_get_period_size(params, &playback_frames, 0) );
+
+  const uint32_t n = (playback_frames * num_channels * 2);
+  playback_buffer.reserve(n);
+  playback_buffer.resize(n);
+  playback_buffer_size = n;
 }
 
 
@@ -123,39 +151,49 @@ int main(int argc, char* argv[])
 
       if (FD_ISSET(client_fd, &err_fds))
       {
-	fprintf(stderr, "socket error\n");
-	close(client_fd);
-	break;
+        fprintf(stderr, "socket error\n");
+        close(client_fd);
+        break;
       }
 
       if (FD_ISSET(client_fd, &write_fds))
       {
-	ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
-	if (n != static_cast<ssize_t>(capture_buffer.size()))
-	{
-	  if (n == -1)
-	  {
-	    fprintf(stderr, "error sending on socket. %s\n", strerror(errno));
-	  }
-	  else
-	  {
-	    fprintf(stderr, "failed to send all audio data. only sent %d of %d bytes.\n",
-		static_cast<int>(n), static_cast<int>(capture_buffer.size()));
-	  }
-	  close(client_fd);
-	  break;
-	}
+        ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
+        if (n != static_cast<ssize_t>(capture_buffer.size()))
+        {
+          if (n == -1)
+          {
+            fprintf(stderr, "error sending on socket. %s\n", strerror(errno));
+          }
+          else
+          {
+            fprintf(stderr, "failed to send all audio data. only sent %d of %d bytes.\n",
+                static_cast<int>(n), static_cast<int>(capture_buffer.size()));
+          }
+          close(client_fd);
+          break;
+        }
       }
 
       if (FD_ISSET(client_fd, &read_fds))
       {
-	// TODO: read from socket, write to playback device
+        // TODO: read from socket, write to playback device
+        int bytes_to_read = (playback_buffer_size - playback_buffer_read);
+        int n = read(client_fd, &playback_buffer[0] + playback_buffer_read, bytes_to_read);
+        if (n > 0)
+        {
+          playback_buffer_read += n;
+          if (playback_buffer_read == playback_buffer_size)
+          {
+            snd_pcm_writei(playback_handle, &playback_buffer[0], playback_frames);
+          }
+        }
       }
 
-      #if 0
+#if 0
       for (int i = 0; i < capture_buffer.size(); ++i)
       {
-	printf("%02x ", capture_buffer[i]);
+        printf("%02x ", capture_buffer[i]);
 	if ((i+1) % 32 == 0)
 	  printf("\n");
       }
