@@ -2,11 +2,14 @@
 #define MAINWINDOW_H
 
 #include <QtWidgets>
-#include <QTcpSocket>
+
 #include <QAudioDeviceInfo>
-#include <QScopedPointer>
-#include <QAudioOutput>
 #include <QAudioFormat>
+#include <QAudioInput>
+#include <QAudioOutput>
+#include <QScopedPointer>
+#include <QTcpSocket>
+
 
 class LogWindow;
 
@@ -23,11 +26,15 @@ private:
   void createAudioInGroupBox();
   void createAudioOutGroupBox();
   void createAudioDecodeFormatGroupBox();
+  void createAudioEncodeFormatGroupBox();
 
   void playAudioData();
-  void initializeAudio(QAudioDeviceInfo const& deviceInfo);
 
-  QAudioFormat getAudioFormat() const;
+  void initializeAudioOutputDevice(QAudioDeviceInfo const& deviceInfo);
+  void initializeAudioInputDevice(QAudioDeviceInfo const& deviceInfo);
+
+  QAudioFormat getAudioOutputFormat() const;
+  QAudioFormat getAudioInputFormat() const;
 
 private slots:
   void connectButtonReleased();
@@ -35,6 +42,8 @@ private slots:
   void audioOutMuteButtonReleased();
   void audioInDeviceChanged(int index);
   void audioOutDeviceChanged(int index);
+  void onEncodeVolumeValueChanged(int value);
+  void onIncomingSoundData();
 
   // socket states
   void onSocketConnected();
@@ -49,15 +58,35 @@ private:
   QLineEdit*                    m_serverAddressLineEdit;
   QLineEdit*                    m_serverPortLineEdit;
 
-  // audio output
+  // audio in
   QGroupBox*                    m_audioInGroupBox;
   QPushButton*                  m_audioInMuteButton;
   QProgressBar*                 m_audioInProgressBar;
   QComboBox*                    m_audioInSelector;
   bool                          m_audioInMute;
   QAudioDeviceInfo              m_audioInDeviceInfo;
+  QScopedPointer<QAudioInput>   m_audioInput;
+  QIODevice*                    m_audioInputDevice;
+  QByteArray                    m_audioWriteBuffer;
 
-  // audio input
+  // audio decode format settings
+  QGroupBox*                    m_audioEncodeGroupBox;
+  QLabel*                       m_audioEncodeSampleRateLabel;
+  QLineEdit*                    m_audioEncodeSampleRateInput;
+  QLabel*                       m_audioEncodeChannelsLabel;
+  QLineEdit*                    m_audioEncodeChannelsInput;
+  QLabel*                       m_audioEncodeSampleSizeLabel;
+  QLineEdit*                    m_audioEncodeSampleSizeInput;
+  QLabel*                       m_audioEncodeCodecLabel;
+  QLineEdit*                    m_audioEncodeCodecInput;
+  QLabel*                       m_audioEncodeByteOrderLabel;
+  QComboBox*                    m_audioEncodeByteOrderSelector;
+  QLabel*                       m_audioEncodeSampleTypeLabel;
+  QComboBox*                    m_audioEncodeSampleTypeSelector;
+  QSlider*                      m_audioEncodeVolumeSlider;
+
+
+  // audio out
   QGroupBox*                    m_audioOutGroupBox;
   QPushButton*                  m_audioOutMuteButton;
   QProgressBar*                 m_audioOutProgressBar;

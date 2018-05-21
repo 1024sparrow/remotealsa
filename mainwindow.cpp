@@ -12,8 +12,8 @@ MainWindow::MainWindow()
   , m_audioOutMute(true)
   , m_audioInDeviceInfo(QAudioDeviceInfo::defaultInputDevice())
   , m_audioReadBuffer(32768, 0)
+  , m_audioWriteBuffer(32768, 0)
   , m_logWindow(nullptr)
-  , m_bytesReceived(0)
 {
   createServerGroupBox();
   createAudioInGroupBox();
@@ -41,16 +41,25 @@ MainWindow::~MainWindow()
 }
 
 void
-MainWindow::initializeAudio(QAudioDeviceInfo const& deviceInfo)
+MainWindow::initializeAudioOutputDevice(QAudioDeviceInfo const& deviceInfo)
 {
   qDebug() << "current deviceInfo:"  << deviceInfo.deviceName();
-  m_logWindow->appendMessage(QString("Initialize audio with device: %1").arg(deviceInfo.deviceName()));
-  m_audioOutput.reset(new QAudioOutput(deviceInfo, getAudioFormat()));
+  m_logWindow->appendMessage(QString("Initialize audio out with device: %1").arg(deviceInfo.deviceName()));
+  m_audioOutput.reset(new QAudioOutput(deviceInfo, getAudioOutputFormat()));
   m_audioOutDevice = m_audioOutput->start();
 }
 
+void
+MainWindow::initializeAudioInputDevice(QAudioDeviceInfo const& deviceInfo)
+{
+  m_logWindow->appendMessage(QString("Initialize audio in with: %1").arg(deviceInfo.deviceName()));
+  m_audioInput.reset(new QAudioInput(deviceInfo, getAudioInputFormat()));
+  m_audioInputDevice = m_audioInput->start();
+  connect(m_audioInputDevice, SIGNAL(readyRead()), this, SLOT(onIncomingSoundData()));
+}
+
 QAudioFormat
-MainWindow::getAudioFormat() const
+MainWindow::getAudioOutputFormat() const
 {
   QAudioFormat format;
   format.setSampleRate(m_audioDecodeSampleRateInput->text().toInt());
@@ -60,10 +69,30 @@ MainWindow::getAudioFormat() const
   format.setByteOrder(m_audioDecodeByteOrderSelector->currentData().value<QAudioFormat::Endian>());
   format.setSampleType(m_audioDecodeSampleTypeSelector->currentData().value<QAudioFormat::SampleType>());
 
-  m_logWindow->appendMessage(QString("format sample_rate:%1 channels:%2 sample_size:%3").
+  m_logWindow->appendMessage(QString("output format sample_rate:%1 channels:%2 sample_size:%3").
     arg(QString::number(format.sampleRate()), QString::number(format.channelCount()),
         QString::number(format.sampleSize())));
-  m_logWindow->appendMessage(QString("format codec:%1 byte_order:%2 sample_type:%3").
+  m_logWindow->appendMessage(QString("output format codec:%1 byte_order:%2 sample_type:%3").
+    arg(format.codec(), QString::number(format.byteOrder()), QString::number(format.sampleType())));
+
+  return format;
+}
+
+QAudioFormat
+MainWindow::getAudioInputFormat() const
+{
+  QAudioFormat format;
+  format.setSampleRate(m_audioEncodeSampleRateInput->text().toInt());
+  format.setChannelCount(m_audioEncodeChannelsInput->text().toInt());
+  format.setSampleSize(m_audioEncodeSampleSizeInput->text().toInt());
+  format.setCodec(m_audioEncodeCodecInput->text());
+  format.setByteOrder(m_audioEncodeByteOrderSelector->currentData().value<QAudioFormat::Endian>());
+  format.setSampleType(m_audioEncodeSampleTypeSelector->currentData().value<QAudioFormat::SampleType>());
+
+  m_logWindow->appendMessage(QString("input format sample_rate:%1 channels:%2 sample_size:%3").
+    arg(QString::number(format.sampleRate()), QString::number(format.channelCount()),
+        QString::number(format.sampleSize())));
+  m_logWindow->appendMessage(QString("input format codec:%1 byte_order:%2 sample_type:%3").
     arg(format.codec(), QString::number(format.byteOrder()), QString::number(format.sampleType())));
 
   return format;
@@ -90,6 +119,8 @@ MainWindow::createServerGroupBox()
 void
 MainWindow::createAudioInGroupBox()
 {
+  createAudioEncodeFormatGroupBox();
+
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
   m_audioInGroupBox = new QGroupBox("Audio In (From your mic)");
@@ -97,6 +128,10 @@ MainWindow::createAudioInGroupBox()
   m_audioInProgressBar = new QProgressBar();
   m_audioInProgressBar->setRange(0, 10);
   m_audioInSelector = new QComboBox();
+  m_audioEncodeVolumeSlider = new QSlider();
+  m_audioEncodeVolumeSlider->setOrientation(Qt::Horizontal);
+  m_audioEncodeVolumeSlider->setRange(0, 100);
+  m_audioEncodeVolumeSlider->setValue(60);
 
   QSet<QString> set;
   QAudioDeviceInfo const& defaultDeviceInfo = QAudioDeviceInfo::defaultInputDevice();
@@ -112,11 +147,15 @@ MainWindow::createAudioInGroupBox()
 
   connect(m_audioInMuteButton, SIGNAL(released()), this, SLOT(audioInMuteButtonReleased()));
   connect(m_audioInSelector, SIGNAL(activated(int)), this, SLOT(audioInDeviceChanged(int)));
+  connect(m_audioEncodeVolumeSlider, SIGNAL(valueChanged(int)), this, SLOT(onEncodeVolumeValueChanged(int)));
 
   hlayout->addWidget(m_audioInMuteButton);
   hlayout->addWidget(m_audioInProgressBar);
   vlayout->addLayout(hlayout);
   vlayout->addWidget(m_audioInSelector);
+  vlayout->addWidget(m_audioEncodeVolumeSlider);
+  vlayout->addWidget(m_audioEncodeGroupBox);
+
   m_audioInGroupBox->setLayout(vlayout);
 }
 
@@ -202,6 +241,51 @@ MainWindow::createAudioDecodeFormatGroupBox()
 }
 
 void
+MainWindow::createAudioEncodeFormatGroupBox()
+{
+  m_audioEncodeGroupBox = new QGroupBox("Encode Parameters");
+  QGridLayout* gridLayout = new QGridLayout();
+
+  m_audioEncodeSampleRateLabel = new QLabel("Sample Rate");
+  m_audioEncodeSampleRateInput = new QLineEdit("44100");
+  gridLayout->addWidget(m_audioEncodeSampleRateLabel, 0, 0, 1, 1);
+  gridLayout->addWidget(m_audioEncodeSampleRateInput, 0, 1, 1, 1);
+
+  m_audioEncodeChannelsLabel = new QLabel("Channels");
+  m_audioEncodeChannelsInput = new QLineEdit("2");
+  gridLayout->addWidget(m_audioEncodeChannelsLabel, 0, 2, 1, 1);
+  gridLayout->addWidget(m_audioEncodeChannelsInput, 0, 3, 1, 1);
+
+  m_audioEncodeSampleSizeLabel = new QLabel("Sample Size");
+  m_audioEncodeSampleSizeInput = new QLineEdit("16");
+  gridLayout->addWidget(m_audioEncodeSampleSizeLabel, 1, 0, 1, 1);
+  gridLayout->addWidget(m_audioEncodeSampleSizeInput, 1, 1, 1, 1);
+
+  m_audioEncodeCodecLabel = new QLabel("Codec");
+  m_audioEncodeCodecInput = new QLineEdit("audio/pcm");
+  m_audioEncodeCodecInput->setReadOnly(true);
+  gridLayout->addWidget(m_audioEncodeCodecLabel, 1, 2, 1, 1);
+  gridLayout->addWidget(m_audioEncodeCodecInput, 1, 3, 1, 1);
+
+  m_audioEncodeByteOrderLabel = new QLabel("Byte Order");
+  m_audioEncodeByteOrderSelector = new QComboBox();
+  m_audioEncodeByteOrderSelector->addItem("Little Endian", qVariantFromValue(QAudioFormat::LittleEndian));
+  m_audioEncodeByteOrderSelector->addItem("Big Endian", qVariantFromValue(QAudioFormat::BigEndian));
+  gridLayout->addWidget(m_audioEncodeByteOrderLabel, 2, 0, 1, 1);
+  gridLayout->addWidget(m_audioEncodeByteOrderSelector, 2, 1, 1, 1);
+
+  m_audioEncodeSampleTypeLabel = new QLabel("Sample Type");
+  m_audioEncodeSampleTypeSelector = new QComboBox();
+  m_audioEncodeSampleTypeSelector->addItem("SignedInt", qVariantFromValue(QAudioFormat::SignedInt));
+  m_audioEncodeSampleTypeSelector->addItem("UnSignedInt", qVariantFromValue(QAudioFormat::UnSignedInt));
+  m_audioEncodeSampleTypeSelector->addItem("Float", qVariantFromValue(QAudioFormat::Float));
+  gridLayout->addWidget(m_audioEncodeSampleTypeLabel, 2, 2, 1, 1);
+  gridLayout->addWidget(m_audioEncodeSampleTypeSelector, 2, 3, 1, 1);
+
+  m_audioEncodeGroupBox->setLayout(gridLayout);
+}
+
+void
 MainWindow::connectButtonReleased()
 {
   if (m_socket != nullptr)
@@ -215,7 +299,8 @@ MainWindow::connectButtonReleased()
   }
   else
   {
-    initializeAudio(m_audioOutSelector->currentData().value<QAudioDeviceInfo>());
+    initializeAudioOutputDevice(m_audioOutSelector->currentData().value<QAudioDeviceInfo>());
+    initializeAudioInputDevice(m_audioInSelector->currentData().value<QAudioDeviceInfo>());
 
     quint16 port = static_cast<quint16>(m_serverPortLineEdit->text().toUInt());
     QString host = m_serverAddressLineEdit->text();
@@ -274,8 +359,6 @@ MainWindow::onSocketConnected()
 void
 MainWindow::onSocketReadyRead()
 {
-  int x = m_audioOutput->periodSize();
-
   int chunks = m_audioOutput->bytesFree() / m_audioOutput->periodSize();
   while (chunks) {
     qint64 const len = m_socket->read(m_audioReadBuffer.data(), m_audioOutput->periodSize());
@@ -288,6 +371,15 @@ MainWindow::onSocketReadyRead()
 }
 
 void
+MainWindow::onIncomingSoundData()
+{
+  qint64 bytes_ready = m_audioInput->bytesReady();
+  qint64 bytes_read = m_audioInputDevice->read(m_audioWriteBuffer.data(), bytes_ready);
+  if (m_socket && !m_audioInMute)
+    m_socket->write(m_audioWriteBuffer.constData(), bytes_read);
+}
+
+void
 MainWindow::onSocketError(QAbstractSocket::SocketError /*socketError*/)
 {
   m_logWindow->appendMessage(QString("socket error: %1").arg(m_socket->errorString()));
@@ -296,12 +388,22 @@ MainWindow::onSocketError(QAbstractSocket::SocketError /*socketError*/)
 void
 MainWindow::audioInDeviceChanged(int index)
 {
-  // qDebug() << "audioInDeviceChanged:" << index;
+  m_audioInput->stop();
+  initializeAudioOutputDevice(m_audioInSelector->itemData(index).value<QAudioDeviceInfo>());
 }
 
 void
 MainWindow::audioOutDeviceChanged(int index)
 {
   m_audioOutput->stop();
-  initializeAudio(m_audioOutSelector->itemData(index).value<QAudioDeviceInfo>());
+  initializeAudioOutputDevice(m_audioOutSelector->itemData(index).value<QAudioDeviceInfo>());
+}
+
+void
+MainWindow::onEncodeVolumeValueChanged(int value)
+{
+  qreal n = QAudio::convertVolume(value / qreal(100),
+    QAudio::LogarithmicVolumeScale, QAudio::LinearVolumeScale);
+  if (m_audioInput)
+    m_audioInput->setVolume(n);
 }
