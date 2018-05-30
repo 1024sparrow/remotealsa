@@ -6,7 +6,9 @@
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
+#include <getopt.h>
 
 #include <string>
 #include <vector>
@@ -21,12 +23,23 @@ static int playback_buffer_read;
 static snd_pcm_uframes_t playback_frames;
 
 #define D(FUNC) if ((err = FUNC) < 0) {\
-    fprintf(stderr, "[%s:%d] -- %s (%d):%s\n", __FILE__, (__LINE__ - 1), #FUNC, err, snd_strerror(err)); \
+    printf("[%s:%d] -- %s (%d):%s\n", __FILE__, (__LINE__ - 1), #FUNC, err, snd_strerror(err)); \
     exit(1);\
   } else { \
-    printf("%s : ok\n", #FUNC); \
+    struct timeval tv; \
+    gettimeofday(&tv, NULL); \
+    printf("%ld.%04ld LOG:(%04d) -- ", tv.tv_sec, tv.tv_usec, __LINE__ - 4);\
+    printf("%s : ok\n", #FUNC);\
   }
 
+#define LOG(FORMAT, ...) \
+  do { \
+    struct timeval tv; \
+    gettimeofday(&tv, NULL); \
+    printf("%ld.%04ld LOG:(%04d) -- ", tv.tv_sec, tv.tv_usec, __LINE__ - 2); \
+    printf(FORMAT, ##__VA_ARGS__); \
+    printf("\n"); \
+  } while (0)
 
 static void setup_capture(char const* capture_handle_name)
 {
@@ -34,6 +47,8 @@ static void setup_capture(char const* capture_handle_name)
   uint32_t sample_rate = 44100;
   snd_pcm_hw_params_t* params;
   snd_pcm_format_t fmt = SND_PCM_FORMAT_S16_LE;
+
+  LOG("setup_capture with device:%s", capture_handle_name);
 
   D( snd_pcm_open(&capture_handle, capture_handle_name, SND_PCM_STREAM_CAPTURE, 0) );
   D( snd_pcm_hw_params_malloc(&params) );
@@ -62,6 +77,8 @@ static void setup_playback(char const* playback_handle_name)
   snd_pcm_hw_params_t* params;
   snd_pcm_uframes_t playback_frames;
 
+  LOG("setup_playback with device:%s", playback_handle_name);
+
   D( snd_pcm_open(&playback_handle, playback_handle_name, SND_PCM_STREAM_PLAYBACK, 0) );
   snd_pcm_hw_params_alloca(&params);
   D( snd_pcm_hw_params_set_format(playback_handle, params, SND_PCM_FORMAT_S16_LE) );
@@ -79,16 +96,44 @@ static void setup_playback(char const* playback_handle_name)
 
 int main(int argc, char* argv[])
 {
-  int err;
-  int server_fd;
-  int port = static_cast<int>(strtol(argv[1], NULL, 10));
-  struct sockaddr_in server_addr;
+  int err = -1;
+  int server_fd = -1;
+  int port = -1;
+  char const* capture_device = NULL;
+  char const* playback_device = NULL;
+  struct sockaddr_in server_addr = {0};
 
-  printf("port:%d\n", port);
 
-  std::string capture_handle_name = "hw:1,0";
+  struct option long_options[] =
+  {
+    { "port", required_argument, NULL, 10000 },
+    { "capture", required_argument, NULL, 'c' },
+    { "playback", required_argument, NULL, 'p' },
+    { 0, 0, 0, 0 }
+  };
 
-  setup_capture(capture_handle_name.c_str());
+  int c;
+  while ((c = getopt_long(argc, argv, "c:p:", long_options, NULL)) != -1)
+  {
+    switch (c)
+    {
+      case 'c':
+        capture_device = optarg;
+        break;
+      case 'p':
+        playback_device = optarg;
+        break;
+      case 10000:
+        port = static_cast<int>(strtol(optarg, NULL, 10));
+        break;
+      case '?':
+        printf("invalid option\n");
+        break;
+    }
+  }
+
+  setup_capture(capture_device);
+  setup_playback(playback_device);
 
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
   memset(&server_addr, 0, sizeof(server_addr));
@@ -99,7 +144,7 @@ int main(int argc, char* argv[])
   err = bind(server_fd, reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr));
   if (err < 0)
   {
-    fprintf(stderr, "failed to bind listen socket. %s", strerror(errno));
+    LOG("failed to bind listen socket. %s", strerror(errno));
     exit(1);
   }
 
@@ -115,11 +160,11 @@ int main(int argc, char* argv[])
 
     if (client_fd < 0)
     {
-      fprintf(stderr, "error accepting client connection. %s", strerror(errno));
+      LOG("error accepting client connection. %s", strerror(errno));
       continue;
     }
 
-    printf("accepted connection\n");
+    LOG("accepted connection");
 
     while (true)
     {
@@ -127,8 +172,8 @@ int main(int argc, char* argv[])
       err = snd_pcm_readi(capture_handle, &capture_buffer[0], capture_buffer_frames);
       if (err != capture_buffer_frames)
       {
-	fprintf(stderr, "error reading from capture handle. %s", snd_strerror(err));
-	exit(1);
+        LOG("error reading from capture handle: %s", snd_strerror(err));
+        exit(1);
       }
 
       fd_set read_fds;
@@ -151,7 +196,7 @@ int main(int argc, char* argv[])
 
       if (FD_ISSET(client_fd, &err_fds))
       {
-        fprintf(stderr, "socket error\n");
+        LOG("socket error");
         close(client_fd);
         break;
       }
@@ -163,11 +208,11 @@ int main(int argc, char* argv[])
         {
           if (n == -1)
           {
-            fprintf(stderr, "error sending on socket. %s\n", strerror(errno));
+            LOG("error sending on socket: %s", strerror(errno));
           }
           else
           {
-            fprintf(stderr, "failed to send all audio data. only sent %d of %d bytes.\n",
+            LOG("failed to send all audio data. only sent %d of %d bytes.",
                 static_cast<int>(n), static_cast<int>(capture_buffer.size()));
           }
           close(client_fd);
@@ -177,7 +222,6 @@ int main(int argc, char* argv[])
 
       if (FD_ISSET(client_fd, &read_fds))
       {
-        // TODO: read from socket, write to playback device
         int bytes_to_read = (playback_buffer_size - playback_buffer_read);
         int n = read(client_fd, &playback_buffer[0] + playback_buffer_read, bytes_to_read);
         if (n > 0)
@@ -189,16 +233,6 @@ int main(int argc, char* argv[])
           }
         }
       }
-
-#if 0
-      for (int i = 0; i < capture_buffer.size(); ++i)
-      {
-        printf("%02x ", capture_buffer[i]);
-	if ((i+1) % 32 == 0)
-	  printf("\n");
-      }
-      printf("\n\n");
-      #endif
     }
 
     close(client_fd);
