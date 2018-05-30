@@ -7,13 +7,46 @@
 #include <QStringBuilder>
 
 MainWindow::MainWindow()
-  : m_socket(nullptr)
+  : m_serverGroupBox(nullptr)
+  , m_connectButton(nullptr)
+  , m_serverAddressLineEdit(nullptr)
+  , m_serverPortLineEdit(nullptr)
+
+  , m_audioInGroupBox(nullptr)
+  , m_audioInMuteButton(nullptr)
+  , m_audioInProgressBar(nullptr)
+  , m_audioInSelector(nullptr)
   , m_audioInMute(true)
-  , m_audioOutMute(true)
   , m_audioInDeviceInfo(QAudioDeviceInfo::defaultInputDevice())
+
+  , m_audioOutGroupBox(nullptr)
+  , m_audioOutMuteButton(nullptr)
+  , m_audioOutProgressBar(nullptr)
+  , m_audioOutSelector(nullptr)
+  , m_audioOutMute(true)
+  , m_audioOutput()
+  , m_audioOutputFormat()
+  , m_audioOutDevice(nullptr)
   , m_audioReadBuffer(32768, 0)
-  , m_audioWriteBuffer(32768, 0)
+
+  , m_audioDecodeGroupBox(nullptr)
+  , m_audioDecodeSampleRateLabel(nullptr)
+  , m_audioDecodeSampleRateInput(nullptr)
+  , m_audioDecodeChannelsLabel(nullptr)
+  , m_audioDecodeChannelsInput(nullptr)
+  , m_audioDecodeSampleSizeLabel(nullptr)
+  , m_audioDecodeSampleSizeInput(nullptr)
+  , m_audioDecodeCodecLabel(nullptr)
+  , m_audioDecodeCodecInput(nullptr)
+  , m_audioDecodeByteOrderLabel(nullptr)
+  , m_audioDecodeByteOrderSelector(nullptr)
+  , m_audioDecodeSampleTypeLabel(nullptr)
+  , m_audioDecodeSampleTypeSelector(nullptr)
+
   , m_logWindow(nullptr)
+  , m_dialogButtonBox(nullptr)
+
+  , m_socket(nullptr)
 {
   createServerGroupBox();
   createAudioInGroupBox();
@@ -123,7 +156,7 @@ MainWindow::createAudioInGroupBox()
 
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
-  m_audioInGroupBox = new QGroupBox("Audio In (From your mic)");
+  m_audioInGroupBox = new QGroupBox("Audio In (From computer running this app)");
   m_audioInMuteButton = new QPushButton("un-mute");
   m_audioInProgressBar = new QProgressBar();
   m_audioInProgressBar->setRange(0, 10);
@@ -366,7 +399,7 @@ MainWindow::onSocketReadyRead()
       m_audioOutDevice->write(m_audioReadBuffer.data(), len);
     if (len != m_audioOutput->periodSize())
         break;
-    -- chunks;
+    --chunks;
   }
 }
 
@@ -402,8 +435,18 @@ MainWindow::audioOutDeviceChanged(int index)
 void
 MainWindow::onEncodeVolumeValueChanged(int value)
 {
-  qreal n = QAudio::convertVolume(value / qreal(100),
+  qreal n;
+ 
+#if QT_VERSION < QT_VERSION_CHECK(5, 8, 0)
+  n = (qreal(value) / 100);
+#else
+  n = QAudio::convertVolume(value / qreal(100),
     QAudio::LogarithmicVolumeScale, QAudio::LinearVolumeScale);
+#endif
+
   if (m_audioInput)
     m_audioInput->setVolume(n);
+
+  if (m_audioOutput)
+    m_audioOutput->stop();
 }

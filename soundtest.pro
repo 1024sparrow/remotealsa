@@ -4,6 +4,7 @@ QT += network
 QT += multimedia
 
 
+CONFIG += debug
 TARGET = soundtest
 TEMPLATE = app
 
