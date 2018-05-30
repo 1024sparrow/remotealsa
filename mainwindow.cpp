@@ -17,7 +17,14 @@ MainWindow::MainWindow()
   , m_audioInProgressBar(nullptr)
   , m_audioInSelector(nullptr)
   , m_audioInMute(true)
+  , m_audioFromFile(false)
   , m_audioInDeviceInfo(QAudioDeviceInfo::defaultInputDevice())
+  , m_audioInput()
+  , m_audioInputDevice(nullptr)
+  , m_audioWriteBuffer()
+  , m_audioInFromDeviceRadioButton(nullptr)
+  , m_audioInFromFileRadioButton(nullptr)
+  , m_audioInOpenFilePushButton(nullptr)
 
   , m_audioOutGroupBox(nullptr)
   , m_audioOutMuteButton(nullptr)
@@ -63,7 +70,24 @@ MainWindow::MainWindow()
   mainLayout->addWidget(m_logWindow);
   mainLayout->addWidget(m_dialogButtonBox);
 
-  //m_audioOutput.reset(new QAudioOutput()
+  connect(&m_audioInputDecoder, &QAudioDecoder::bufferReady, [this]()
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error),
+         [this](QAudioDecoder::Error err)
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, &QAudioDecoder::stateChanged,
+         [this](QAudioDecoder::State newState)
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, &QAudioDecoder::finished, [this]()
+  {
+    // TODO
+  });
 
   setLayout(mainLayout);
   setWindowTitle("Sound Test");
@@ -156,7 +180,17 @@ MainWindow::createAudioInGroupBox()
 
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
-  m_audioInGroupBox = new QGroupBox("Audio In (From computer running this app)");
+  QHBoxLayout* pushButtonLayout = new QHBoxLayout();
+
+  m_audioInFromDeviceRadioButton = new QRadioButton("From Device");
+  m_audioInFromDeviceRadioButton->setChecked(true);
+  m_audioInFromFileRadioButton = new QRadioButton("From File");
+  m_audioInFromFileRadioButton->setChecked(false);
+  m_audioInOpenFilePushButton = new QPushButton("Open File");
+  m_audioInOpenFilePushButton->setEnabled(false);
+
+
+  m_audioInGroupBox = new QGroupBox("Audio In (From this computer)");
   m_audioInMuteButton = new QPushButton("un-mute");
   m_audioInProgressBar = new QProgressBar();
   m_audioInProgressBar->setRange(0, 10);
@@ -178,13 +212,41 @@ MainWindow::createAudioInGroupBox()
     }
   }
 
+  connect(m_audioInOpenFilePushButton, &QPushButton::released, [this]()
+  {
+    QString wavFile = QFileDialog::getOpenFileName(this, "Open WAV File");
+    m_audioInputDecoder.setAudioFormat(getAudioInputFormat());
+    m_audioInputDecoder.setSourceFilename(wavFile);
+    m_audioInputDecoder.start();
+  });
+
+  connect(m_audioInFromDeviceRadioButton, &QRadioButton::toggled, [this]()
+  {
+    m_audioFromFile = false;
+    m_audioInOpenFilePushButton->setEnabled(false);
+    m_audioInSelector->setEnabled(true);
+  });
+
+  connect(m_audioInFromFileRadioButton, &QRadioButton::toggled, [this]()
+  {
+    m_audioFromFile = true;
+    m_audioInOpenFilePushButton->setEnabled(true);
+    m_audioInSelector->setEnabled(false);
+  });
+
   connect(m_audioInMuteButton, SIGNAL(released()), this, SLOT(audioInMuteButtonReleased()));
   connect(m_audioInSelector, SIGNAL(activated(int)), this, SLOT(audioInDeviceChanged(int)));
   connect(m_audioEncodeVolumeSlider, SIGNAL(valueChanged(int)), this, SLOT(onEncodeVolumeValueChanged(int)));
 
+  pushButtonLayout->addWidget(m_audioInFromDeviceRadioButton);
+  pushButtonLayout->addWidget(m_audioInFromFileRadioButton);
+  pushButtonLayout->addWidget(m_audioInOpenFilePushButton);
+  vlayout->addLayout(pushButtonLayout);
+
   hlayout->addWidget(m_audioInMuteButton);
   hlayout->addWidget(m_audioInProgressBar);
   vlayout->addLayout(hlayout);
+
   vlayout->addWidget(m_audioInSelector);
   vlayout->addWidget(m_audioEncodeVolumeSlider);
   vlayout->addWidget(m_audioEncodeGroupBox);
@@ -199,7 +261,7 @@ MainWindow::createAudioOutGroupBox()
 
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
-  m_audioOutGroupBox = new QGroupBox("Audio Out (From remote end)");
+  m_audioOutGroupBox = new QGroupBox("Audio Out (From camera)");
   m_audioOutMuteButton = new QPushButton("un-mute");
   m_audioOutProgressBar = new QProgressBar();
   m_audioOutProgressBar->setRange(0, 10);
@@ -406,8 +468,12 @@ MainWindow::onSocketReadyRead()
 void
 MainWindow::onIncomingSoundData()
 {
+  if (m_audioFromFile)
+    return;
+
   qint64 bytes_ready = m_audioInput->bytesReady();
   qint64 bytes_read = m_audioInputDevice->read(m_audioWriteBuffer.data(), bytes_ready);
+
   if (m_socket && !m_audioInMute)
     m_socket->write(m_audioWriteBuffer.constData(), bytes_read);
 }
