@@ -7,13 +7,53 @@
 #include <QStringBuilder>
 
 MainWindow::MainWindow()
-  : m_socket(nullptr)
+  : m_serverGroupBox(nullptr)
+  , m_connectButton(nullptr)
+  , m_serverAddressLineEdit(nullptr)
+  , m_serverPortLineEdit(nullptr)
+
+  , m_audioInGroupBox(nullptr)
+  , m_audioInMuteButton(nullptr)
+  , m_audioInProgressBar(nullptr)
+  , m_audioInSelector(nullptr)
   , m_audioInMute(true)
-  , m_audioOutMute(true)
+  , m_audioFromFile(false)
   , m_audioInDeviceInfo(QAudioDeviceInfo::defaultInputDevice())
+  , m_audioInput()
+  , m_audioInputDevice(nullptr)
+  , m_audioWriteBuffer()
+  , m_audioInFromDeviceRadioButton(nullptr)
+  , m_audioInFromFileRadioButton(nullptr)
+  , m_audioInOpenFilePushButton(nullptr)
+
+  , m_audioOutGroupBox(nullptr)
+  , m_audioOutMuteButton(nullptr)
+  , m_audioOutProgressBar(nullptr)
+  , m_audioOutSelector(nullptr)
+  , m_audioOutMute(true)
+  , m_audioOutput()
+  , m_audioOutputFormat()
+  , m_audioOutDevice(nullptr)
   , m_audioReadBuffer(32768, 0)
-  , m_audioWriteBuffer(32768, 0)
+
+  , m_audioDecodeGroupBox(nullptr)
+  , m_audioDecodeSampleRateLabel(nullptr)
+  , m_audioDecodeSampleRateInput(nullptr)
+  , m_audioDecodeChannelsLabel(nullptr)
+  , m_audioDecodeChannelsInput(nullptr)
+  , m_audioDecodeSampleSizeLabel(nullptr)
+  , m_audioDecodeSampleSizeInput(nullptr)
+  , m_audioDecodeCodecLabel(nullptr)
+  , m_audioDecodeCodecInput(nullptr)
+  , m_audioDecodeByteOrderLabel(nullptr)
+  , m_audioDecodeByteOrderSelector(nullptr)
+  , m_audioDecodeSampleTypeLabel(nullptr)
+  , m_audioDecodeSampleTypeSelector(nullptr)
+
   , m_logWindow(nullptr)
+  , m_dialogButtonBox(nullptr)
+
+  , m_socket(nullptr)
 {
   createServerGroupBox();
   createAudioInGroupBox();
@@ -30,7 +70,24 @@ MainWindow::MainWindow()
   mainLayout->addWidget(m_logWindow);
   mainLayout->addWidget(m_dialogButtonBox);
 
-  //m_audioOutput.reset(new QAudioOutput()
+  connect(&m_audioInputDecoder, &QAudioDecoder::bufferReady, [this]()
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error),
+         [this](QAudioDecoder::Error err)
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, &QAudioDecoder::stateChanged,
+         [this](QAudioDecoder::State newState)
+  {
+    // TODO
+  });
+  connect(&m_audioInputDecoder, &QAudioDecoder::finished, [this]()
+  {
+    // TODO
+  });
 
   setLayout(mainLayout);
   setWindowTitle("Sound Test");
@@ -123,7 +180,17 @@ MainWindow::createAudioInGroupBox()
 
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
-  m_audioInGroupBox = new QGroupBox("Audio In (From your mic)");
+  QHBoxLayout* pushButtonLayout = new QHBoxLayout();
+
+  m_audioInFromDeviceRadioButton = new QRadioButton("From Device");
+  m_audioInFromDeviceRadioButton->setChecked(true);
+  m_audioInFromFileRadioButton = new QRadioButton("From File");
+  m_audioInFromFileRadioButton->setChecked(false);
+  m_audioInOpenFilePushButton = new QPushButton("Open File");
+  m_audioInOpenFilePushButton->setEnabled(false);
+
+
+  m_audioInGroupBox = new QGroupBox("Audio In (From this computer)");
   m_audioInMuteButton = new QPushButton("un-mute");
   m_audioInProgressBar = new QProgressBar();
   m_audioInProgressBar->setRange(0, 10);
@@ -145,13 +212,41 @@ MainWindow::createAudioInGroupBox()
     }
   }
 
+  connect(m_audioInOpenFilePushButton, &QPushButton::released, [this]()
+  {
+    QString wavFile = QFileDialog::getOpenFileName(this, "Open WAV File");
+    m_audioInputDecoder.setAudioFormat(getAudioInputFormat());
+    m_audioInputDecoder.setSourceFilename(wavFile);
+    m_audioInputDecoder.start();
+  });
+
+  connect(m_audioInFromDeviceRadioButton, &QRadioButton::toggled, [this]()
+  {
+    m_audioFromFile = false;
+    m_audioInOpenFilePushButton->setEnabled(false);
+    m_audioInSelector->setEnabled(true);
+  });
+
+  connect(m_audioInFromFileRadioButton, &QRadioButton::toggled, [this]()
+  {
+    m_audioFromFile = true;
+    m_audioInOpenFilePushButton->setEnabled(true);
+    m_audioInSelector->setEnabled(false);
+  });
+
   connect(m_audioInMuteButton, SIGNAL(released()), this, SLOT(audioInMuteButtonReleased()));
   connect(m_audioInSelector, SIGNAL(activated(int)), this, SLOT(audioInDeviceChanged(int)));
   connect(m_audioEncodeVolumeSlider, SIGNAL(valueChanged(int)), this, SLOT(onEncodeVolumeValueChanged(int)));
 
+  pushButtonLayout->addWidget(m_audioInFromDeviceRadioButton);
+  pushButtonLayout->addWidget(m_audioInFromFileRadioButton);
+  pushButtonLayout->addWidget(m_audioInOpenFilePushButton);
+  vlayout->addLayout(pushButtonLayout);
+
   hlayout->addWidget(m_audioInMuteButton);
   hlayout->addWidget(m_audioInProgressBar);
   vlayout->addLayout(hlayout);
+
   vlayout->addWidget(m_audioInSelector);
   vlayout->addWidget(m_audioEncodeVolumeSlider);
   vlayout->addWidget(m_audioEncodeGroupBox);
@@ -166,7 +261,7 @@ MainWindow::createAudioOutGroupBox()
 
   QVBoxLayout* vlayout = new QVBoxLayout();
   QHBoxLayout* hlayout = new QHBoxLayout();
-  m_audioOutGroupBox = new QGroupBox("Audio Out (From remote end)");
+  m_audioOutGroupBox = new QGroupBox("Audio Out (From camera)");
   m_audioOutMuteButton = new QPushButton("un-mute");
   m_audioOutProgressBar = new QProgressBar();
   m_audioOutProgressBar->setRange(0, 10);
@@ -366,15 +461,19 @@ MainWindow::onSocketReadyRead()
       m_audioOutDevice->write(m_audioReadBuffer.data(), len);
     if (len != m_audioOutput->periodSize())
         break;
-    -- chunks;
+    --chunks;
   }
 }
 
 void
 MainWindow::onIncomingSoundData()
 {
+  if (m_audioFromFile)
+    return;
+
   qint64 bytes_ready = m_audioInput->bytesReady();
   qint64 bytes_read = m_audioInputDevice->read(m_audioWriteBuffer.data(), bytes_ready);
+
   if (m_socket && !m_audioInMute)
     m_socket->write(m_audioWriteBuffer.constData(), bytes_read);
 }
@@ -402,8 +501,18 @@ MainWindow::audioOutDeviceChanged(int index)
 void
 MainWindow::onEncodeVolumeValueChanged(int value)
 {
-  qreal n = QAudio::convertVolume(value / qreal(100),
+  qreal n;
+ 
+#if QT_VERSION < QT_VERSION_CHECK(5, 8, 0)
+  n = (qreal(value) / 100);
+#else
+  n = QAudio::convertVolume(value / qreal(100),
     QAudio::LogarithmicVolumeScale, QAudio::LinearVolumeScale);
+#endif
+
   if (m_audioInput)
     m_audioInput->setVolume(n);
+
+  if (m_audioOutput)
+    m_audioOutput->stop();
 }

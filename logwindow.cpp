@@ -1,7 +1,7 @@
 #include "logwindow.h"
 
 #include <QDateTime>
-#include <QSCrollBar>
+#include <QScrollBar>
 
 LogWindow::LogWindow()
 {

@@ -3,6 +3,7 @@
 
 #include <QtWidgets>
 
+#include <QAudioDecoder>
 #include <QAudioDeviceInfo>
 #include <QAudioFormat>
 #include <QAudioInput>
@@ -64,10 +65,15 @@ private:
   QProgressBar*                 m_audioInProgressBar;
   QComboBox*                    m_audioInSelector;
   bool                          m_audioInMute;
+  bool                          m_audioFromFile;
   QAudioDeviceInfo              m_audioInDeviceInfo;
   QScopedPointer<QAudioInput>   m_audioInput;
   QIODevice*                    m_audioInputDevice;
   QByteArray                    m_audioWriteBuffer;
+  QRadioButton*                 m_audioInFromDeviceRadioButton;
+  QRadioButton*                 m_audioInFromFileRadioButton;
+  QPushButton*                  m_audioInOpenFilePushButton;
+  QAudioDecoder                 m_audioInputDecoder;
 
   // audio decode format settings
   QGroupBox*                    m_audioEncodeGroupBox;
