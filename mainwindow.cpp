@@ -6,6 +6,9 @@
 #include <QSet>
 #include <QStringBuilder>
 
+static const qint32 kDefaultSamplingRate = 16000;
+static const qint32 kDefaultNumberOfChannels = 2;
+
 MainWindow::MainWindow()
   : m_serverGroupBox(nullptr)
   , m_connectButton(nullptr)
@@ -21,7 +24,7 @@ MainWindow::MainWindow()
   , m_audioInDeviceInfo(QAudioDeviceInfo::defaultInputDevice())
   , m_audioInput()
   , m_audioInputDevice(nullptr)
-  , m_audioWriteBuffer()
+  , m_audioWriteBuffer(32768, 0)
   , m_audioInFromDeviceRadioButton(nullptr)
   , m_audioInFromFileRadioButton(nullptr)
   , m_audioInOpenFilePushButton(nullptr)
@@ -35,6 +38,8 @@ MainWindow::MainWindow()
   , m_audioOutputFormat()
   , m_audioOutDevice(nullptr)
   , m_audioReadBuffer(32768, 0)
+  , m_audioBytesReceived(0)
+  , m_audioReadRateLastReported(QDateTime::currentMSecsSinceEpoch())
 
   , m_audioDecodeGroupBox(nullptr)
   , m_audioDecodeSampleRateLabel(nullptr)
@@ -77,12 +82,13 @@ MainWindow::MainWindow()
   connect(&m_audioInputDecoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error),
          [this](QAudioDecoder::Error err)
   {
-    // TODO
+    qInfo() << "audio decoder error:" << err;
+    qInfo() << m_audioInputDecoder.errorString();
   });
   connect(&m_audioInputDecoder, &QAudioDecoder::stateChanged,
          [this](QAudioDecoder::State newState)
   {
-    // TODO
+    qInfo() << "audio decoder state change:" << newState;
   });
   connect(&m_audioInputDecoder, &QAudioDecoder::finished, [this]()
   {
@@ -297,12 +303,12 @@ MainWindow::createAudioDecodeFormatGroupBox()
   QGridLayout* gridLayout = new QGridLayout();
 
   m_audioDecodeSampleRateLabel = new QLabel("Sample Rate");
-  m_audioDecodeSampleRateInput = new QLineEdit("44100");
+  m_audioDecodeSampleRateInput = new QLineEdit(QString::number(kDefaultSamplingRate));
   gridLayout->addWidget(m_audioDecodeSampleRateLabel, 0, 0, 1, 1);
   gridLayout->addWidget(m_audioDecodeSampleRateInput, 0, 1, 1, 1);
 
   m_audioDecodeChannelsLabel = new QLabel("Channels");
-  m_audioDecodeChannelsInput = new QLineEdit("2");
+  m_audioDecodeChannelsInput = new QLineEdit(QString::number(kDefaultNumberOfChannels));
   gridLayout->addWidget(m_audioDecodeChannelsLabel, 0, 2, 1, 1);
   gridLayout->addWidget(m_audioDecodeChannelsInput, 0, 3, 1, 1);
 
@@ -342,12 +348,12 @@ MainWindow::createAudioEncodeFormatGroupBox()
   QGridLayout* gridLayout = new QGridLayout();
 
   m_audioEncodeSampleRateLabel = new QLabel("Sample Rate");
-  m_audioEncodeSampleRateInput = new QLineEdit("44100");
+  m_audioEncodeSampleRateInput = new QLineEdit(QString::number(kDefaultSamplingRate));
   gridLayout->addWidget(m_audioEncodeSampleRateLabel, 0, 0, 1, 1);
   gridLayout->addWidget(m_audioEncodeSampleRateInput, 0, 1, 1, 1);
 
   m_audioEncodeChannelsLabel = new QLabel("Channels");
-  m_audioEncodeChannelsInput = new QLineEdit("2");
+  m_audioEncodeChannelsInput = new QLineEdit(QString::number(kDefaultNumberOfChannels));
   gridLayout->addWidget(m_audioEncodeChannelsLabel, 0, 2, 1, 1);
   gridLayout->addWidget(m_audioEncodeChannelsInput, 0, 3, 1, 1);
 
@@ -434,13 +440,21 @@ MainWindow::audioOutMuteButtonReleased()
   {
     m_audioOutMuteButton->setText("mute");
     m_audioOutMute = false;
-    m_logWindow->appendMessage("audio output muted");
+    m_logWindow->appendMessage("audio output un-muted");
+
+    QString tempPath = QDir().tempPath() + "/out.pcm";
+    // m_pcmOutputFile.reset(new QFile(tempPath));
+    // m_pcmOutputFile->open(QFile::WriteOnly | QFile::Truncate);
+    m_logWindow->appendMessage(QString("opened for PCM capture:%1").arg(tempPath));
   }
   else
   {
+    if (m_pcmOutputFile)
+      m_pcmOutputFile.reset();
+
     m_audioOutMuteButton->setText("un-mute");
     m_audioOutMute = true;
-    m_logWindow->appendMessage("audio output un-muted");
+    m_logWindow->appendMessage("audio output muted");
   }
 }
 
@@ -454,16 +468,28 @@ MainWindow::onSocketConnected()
 void
 MainWindow::onSocketReadyRead()
 {
-  int chunks = m_audioOutput->bytesFree() / m_audioOutput->periodSize();
+  static qint64 const periodSize = m_audioOutput->periodSize();
+
+  int chunks = m_audioOutput->bytesFree() / periodSize;
   while (chunks) {
-    qint64 const len = m_socket->read(m_audioReadBuffer.data(), m_audioOutput->periodSize());
-    if (len && !m_audioOutMute)
+
+    qint64 len = m_socket->peek(m_audioReadBuffer.data(), periodSize);
+    if (len < periodSize)
+      return;
+
+    m_socket->read(m_audioReadBuffer.data(), len);
+
+    if (!m_audioOutMute)
+    {
       m_audioOutDevice->write(m_audioReadBuffer.data(), len);
-    if (len != m_audioOutput->periodSize())
-        break;
+      if (m_pcmOutputFile)
+        m_pcmOutputFile->write(m_audioReadBuffer.data(), len);
+    }
+
     --chunks;
   }
 }
+
 
 void
 MainWindow::onIncomingSoundData()

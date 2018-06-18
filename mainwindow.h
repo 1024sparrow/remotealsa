@@ -102,6 +102,8 @@ private:
   QAudioFormat                  m_audioOutputFormat;
   QIODevice*                    m_audioOutDevice;
   QByteArray                    m_audioReadBuffer;
+  quint64                       m_audioBytesReceived;
+  quint64                       m_audioReadRateLastReported;
 
   // audio decode format settings
   QGroupBox*                    m_audioDecodeGroupBox;
@@ -124,6 +126,8 @@ private:
 
   // client socket
   QTcpSocket*                   m_socket;
+  QScopedPointer<QFile>         m_pcmOutputFile;
+  QScopedPointer<QThread>       m_socketReader;
 };
 
 #endif // MAINWINDOW_H
