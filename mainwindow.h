@@ -14,6 +14,21 @@
 
 class LogWindow;
 
+class AudioSource : public QIODevice
+{
+  Q_OBJECT
+
+public:
+  AudioSource();
+
+  qint64 readData(char* data, qint64 maxLen) override;
+  qint64 writeData(char const* data, qint64 len) override;
+  qint64 bytesAvailable() const override;
+
+ private:
+  QByteArray m_data;
+};
+
 class MainWindow : public QDialog
 {
   Q_OBJECT
@@ -125,9 +140,10 @@ private:
   QDialogButtonBox*             m_dialogButtonBox;
 
   // client socket
-  QTcpSocket*                   m_socket;
+  QSharedPointer<QTcpSocket>    m_socket;
   QScopedPointer<QFile>         m_pcmOutputFile;
   QScopedPointer<QThread>       m_socketReader;
+  QScopedPointer<AudioSource>   m_audioSourceBuffer;
 };
 
 #endif // MAINWINDOW_H
