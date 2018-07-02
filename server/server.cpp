@@ -86,13 +86,15 @@ static void setup_playback(char const* playback_handle_name)
   int err;
   uint32_t period_time;
   snd_pcm_hw_params_t* params;
-  snd_pcm_uframes_t playback_frames;
+  snd_pcm_uframes_t playback_frames = 16;
 
   LOG("setup_playback with device:%s", playback_handle_name);
 
   D( snd_pcm_open(&playback_handle, playback_handle_name, SND_PCM_STREAM_PLAYBACK, 0) );
   snd_pcm_hw_params_alloca(&params);
-  D( snd_pcm_hw_params_get_period_size(params, &playback_frames, 0) );
+  D( snd_pcm_hw_params_any(playback_handle, params) );
+  D( snd_pcm_hw_params_set_access(playback_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED));
+//  D( snd_pcm_hw_params_get_period_size(params, &playback_frames, 0) );
   D( snd_pcm_hw_params_set_format(playback_handle, params, SND_PCM_FORMAT_S16_LE) );
   D( snd_pcm_hw_params_set_channels(playback_handle, params, playback_num_channels) );
   D( snd_pcm_hw_params_set_rate_near(playback_handle, params, &playback_sample_rate, 0) );
@@ -194,6 +196,7 @@ int main(int argc, char* argv[])
   struct option long_options[] =
   {
     { "port", required_argument, NULL, 10000 },
+
     { "capture", required_argument, NULL, 'c' },
     { "capture-channels", required_argument, NULL, 'd' },
     { "capture-rate", required_argument, NULL, 'r' },
@@ -286,21 +289,27 @@ int main(int argc, char* argv[])
 
     while (true)
     {
-      // std::fill(capture_buffer.begin(), capture_buffer.end(), 0);
-      err = snd_pcm_readi(capture_handle, &capture_buffer[0], capture_buffer_frames);
-      if (err != capture_buffer_frames)
-      {
-        exception_handler(capture_handle);
-      }
-
       fd_set read_fds;
       fd_set write_fds;
       fd_set err_fds;
       FD_ZERO(&write_fds);
       FD_ZERO(&read_fds);
       FD_ZERO(&err_fds);
+
+      // std::fill(capture_buffer.begin(), capture_buffer.end(), 0);
+      if (capture_handle)
+      {
+        err = snd_pcm_readi(capture_handle, &capture_buffer[0], capture_buffer_frames);
+        if (err != capture_buffer_frames)
+        {
+          exception_handler(capture_handle);
+        }
+
+        // only care about writing if we're in capture mode, therefore, sending 
+        FD_SET(client_fd, &write_fds);
+      }
+
       FD_SET(client_fd, &read_fds);
-      FD_SET(client_fd, &write_fds);
       FD_SET(client_fd, &err_fds);
 
       struct timeval timeout;
@@ -318,7 +327,7 @@ int main(int argc, char* argv[])
         break;
       }
 
-      if (FD_ISSET(client_fd, &write_fds))
+      if (capture_handle && FD_ISSET(client_fd, &write_fds))
       {
         ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
         if (n != static_cast<ssize_t>(capture_buffer.size()))
