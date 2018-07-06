@@ -5,14 +5,17 @@
 #include <QHostAddress>
 #include <QSet>
 #include <QStringBuilder>
+#include <QNetworkDatagram>
 
 static const qint32 kDefaultSamplingRate = 16000;
 static const qint32 kDefaultNumberOfChannels = 2;
+
 
 #define PUSHMODE 1
 
 AudioSource::AudioSource()
 {
+
 }
 
 qint64 AudioSource::readData(char* data, qint64 maxLen)
@@ -139,11 +142,12 @@ MainWindow::initializeAudioOutputDevice(QAudioDeviceInfo const& deviceInfo)
   qDebug() << "current deviceInfo:"  << deviceInfo.deviceName();
   m_logWindow->appendMessage(QString("Initialize audio out with device: %1").arg(deviceInfo.deviceName()));
   m_audioOutput.reset(new QAudioOutput(deviceInfo, getAudioOutputFormat()));
+  m_audioOutput->setBufferSize(12800 * 4);
 #if PUSHMODE
   m_audioOutDevice = m_audioOutput->start();
 #else
-  m_audioSourceBuffer.reset(new AudioSource());
-  m_audioSourceBuffer->open(QIODevice::ReadOnly);
+  m_audioSourceBuffer.reset(new QBuffer());
+  m_audioSourceBuffer->open(QIODevice::ReadWrite);
   m_audioOutput->start(m_audioSourceBuffer.data());
   qDebug() << "audio playback state:" << m_audioOutput->state();
 #endif
@@ -231,7 +235,6 @@ MainWindow::createAudioInGroupBox()
   m_audioInFromFileRadioButton->setChecked(false);
   m_audioInOpenFilePushButton = new QPushButton("Open File");
   m_audioInOpenFilePushButton->setEnabled(false);
-
 
   m_audioInGroupBox = new QGroupBox("Audio In (From this computer)");
   m_audioInMuteButton = new QPushButton("un-mute");
@@ -479,11 +482,14 @@ MainWindow::audioOutMuteButtonReleased()
     m_audioOutMute = false;
     m_logWindow->appendMessage("audio output un-muted");
 
+#if 0
     QString prefix = QDateTime::currentDateTime().toString("yyyymmddHHmmss");
     QString tempPath = QDir().tempPath() + "/" + prefix + "_capture.pcm";
     m_pcmOutputFile.reset(new QFile(tempPath));
     m_pcmOutputFile->open(QFile::WriteOnly | QFile::Truncate);
     m_logWindow->appendMessage(QString("opened for PCM capture:%1").arg(tempPath));
+#endif
+
   }
   else
   {
@@ -526,28 +532,51 @@ MainWindow::onSocketReadyRead()
 #if PUSHMODE
   static qint64 const periodSize = m_audioOutput->periodSize();
 
-  int chunks = m_audioOutput->bytesFree() / periodSize;
-  while (chunks) {
+  // int bufferSize = m_audioOutput->bufferSize();
 
-    qint64 len = m_socket->peek(m_audioReadBuffer.data(), periodSize);
-    if (len < periodSize)
-      return;
+  int numFramesFree = m_audioOutput->bytesFree() / periodSize;
+  int numFramesAvailable = m_socket->bytesAvailable() / periodSize;
 
-    m_socket->read(m_audioReadBuffer.data(), len); 
+  int numFramesToRead = qMin(numFramesFree, numFramesAvailable);
+
+  //if (numFramesFree != 0)
+  //{
+  //  qDebug() << "numFramesFree:" << numFramesFree << " numFramesAvailable:"
+  //           << numFramesAvailable;
+  //}
+
+  qint64 n = m_socket->read(m_audioReadBuffer.data(), (numFramesToRead * periodSize));
+  if (!m_audioOutMute)
+  {
+    m_audioOutDevice->write(m_audioReadBuffer.data(), n);
+    if (m_pcmOutputFile)
+      m_pcmOutputFile->write(m_audioReadBuffer.data(), n);
+  }
+
+#if 0
+  while ((m_audioOutput->bytesFree() > periodSize) && (m_socket->bytesAvailable() > periodSize))
+  {
+    // if (m_socket->bytesAvailable() < periodSize)
+    //  return;
+
+    //qint64 len = m_socket->peek(m_audioReadBuffer.data(), periodSize);
+    //if (len < periodSize)
+    //  return;
+
+    m_socket->read(m_audioReadBuffer.data(), periodSize);
 
     if (!m_audioOutMute)
     {
-      m_audioOutDevice->write(m_audioReadBuffer.data(), len);
+      m_audioOutDevice->write(m_audioReadBuffer.data(), periodSize);
       if (m_pcmOutputFile)
-        m_pcmOutputFile->write(m_audioReadBuffer.data(), len);
+        m_pcmOutputFile->write(m_audioReadBuffer.data(), periodSize);
     }
 
-    --chunks;
+    // --chunks;
   }
-#else
-  QByteArray const data = m_socket->readAll();
-  m_audioSourceBuffer->writeData(data.data(), data.size());
 #endif
+#endif
+
 }
 
 

@@ -8,8 +8,10 @@
 #include <QAudioFormat>
 #include <QAudioInput>
 #include <QAudioOutput>
+#include <QBuffer>
 #include <QScopedPointer>
 #include <QTcpSocket>
+#include <QUdpSocket>
 
 
 class LogWindow;
@@ -24,6 +26,9 @@ public:
   qint64 readData(char* data, qint64 maxLen) override;
   qint64 writeData(char const* data, qint64 len) override;
   qint64 bytesAvailable() const override;
+
+  void append(QByteArray const& buff)
+    { m_data.append(buff); }
 
  private:
   QByteArray m_data;
@@ -143,7 +148,8 @@ private:
   QSharedPointer<QTcpSocket>    m_socket;
   QScopedPointer<QFile>         m_pcmOutputFile;
   QScopedPointer<QThread>       m_socketReader;
-  QScopedPointer<AudioSource>   m_audioSourceBuffer;
+  // QScopedPointer<AudioSource>   m_audioSourceBuffer;
+  QScopedPointer<QBuffer>       m_audioSourceBuffer;
 };
 
 #endif // MAINWINDOW_H
