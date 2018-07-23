@@ -165,21 +165,22 @@ static void exception_handler(snd_pcm_t* h)
   exit(1);
 }
 
-static void print_help_arg(char const* longname, char shortname, char const* varname,
-  char const* description)
-{
-}
-
 static void print_help()
 {
-  printf("Usage xaudio [OPTIONS]\n");
-  print_help_arg("port", '\0', "<port>", "Port to listen on");
-  print_help_arg("capture", 'c', "<devname>", "Capture device name. Use 'default' without quotes if unsure");
-  print_help_arg("capture-channels", 'd', "<int>", "Number of channels, default is 2");
-  print_help_arg("capture-rate", 'r', "<int>", "Sampling rate, default 16khz");
-  print_help_arg("capture-frames", 'f', "<int>", "Not sure about this one...");
-  print_help_arg("playback", 'p', "<int>", "Playback device name. Use 'default' without quite if unsure");
-  print_help_arg("help", 'h', NULL, "Print this help");
+  printf("\n");
+  printf("\tUsage xaudio [OPTIONS]\n");
+  printf("\t\t--port=<port>                     The port to listen on\n");
+  printf("\t\t--capture=<devname>     -c <name> The ALSA capture device. If unsure, use 'default'\n");
+  printf("\t\t--capture-channels=<n>  -d <n>    The number of channels. Use 1\n");
+  printf("\t\t--capture-rate=<KHZ>    -r <KHZ>  The capture rate in hertz. Use 16000\n");
+  printf("\t\t--capture-frames=<n>    -f <n>    Not sure, skip it.\n");
+  printf("\t\t--playback=<devnam>     -p <name> The playback device name. If unsure, use 'default'\n");
+  printf("\t\t--help                  -h        Print this help and exit\n");
+  printf("\n");
+  printf("Examples:\n");
+  printf("\txaudio --port=10100 --capture=default\n");
+  printf("\txaudio --port=10100 --capture=default --playback=default\n");
+  printf("\n");
 }
 
 
@@ -235,9 +236,17 @@ int main(int argc, char* argv[])
         port = static_cast<int>(strtol(optarg, NULL, 10));
         break;
       case '?':
-        printf("invalid option\n");
+        print_help();
+        exit(0);
         break;
     }
+  }
+
+  if (port == -1)
+  {
+    printf("failed to provide listening port with --port=<port>\n");
+    print_help();
+    exit(0);
   }
 
   LOG("sound library:%s", snd_asoundlib_version());
