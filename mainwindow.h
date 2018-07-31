@@ -59,6 +59,7 @@ private:
 
 private slots:
   void connectButtonReleased();
+  void reconnectToHost();
   void audioInMuteButtonReleased();
   void audioOutMuteButtonReleased();
   void audioInDeviceChanged(int index);
@@ -150,6 +151,7 @@ private:
   QScopedPointer<QThread>       m_socketReader;
   // QScopedPointer<AudioSource>   m_audioSourceBuffer;
   QScopedPointer<QBuffer>       m_audioSourceBuffer;
+  bool                          m_shouldBeConnected;
 };
 
 #endif // MAINWINDOW_H

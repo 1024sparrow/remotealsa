@@ -8,7 +8,7 @@
 #include <QNetworkDatagram>
 
 static const qint32 kDefaultSamplingRate = 16000;
-static const qint32 kDefaultNumberOfChannels = 2;
+static const qint32 kDefaultNumberOfChannels = 1;
 
 
 #define PUSHMODE 1
@@ -92,6 +92,7 @@ MainWindow::MainWindow()
 
   , m_socket()
   , m_audioSourceBuffer()
+  , m_shouldBeConnected(false)
 {
   createServerGroupBox();
   createAudioInGroupBox();
@@ -142,7 +143,7 @@ MainWindow::initializeAudioOutputDevice(QAudioDeviceInfo const& deviceInfo)
   qDebug() << "current deviceInfo:"  << deviceInfo.deviceName();
   m_logWindow->appendMessage(QString("Initialize audio out with device: %1").arg(deviceInfo.deviceName()));
   m_audioOutput.reset(new QAudioOutput(deviceInfo, getAudioOutputFormat()));
-  m_audioOutput->setBufferSize(12800 * 4);
+  m_audioOutput->setBufferSize(12800 * 10);
 #if PUSHMODE
   m_audioOutDevice = m_audioOutput->start();
 #else
@@ -437,6 +438,7 @@ MainWindow::connectButtonReleased()
     m_socket.reset();
     m_connectButton->setText("Connect");
     m_audioSourceBuffer.reset();
+    m_shouldBeConnected = false;
   }
   else
   {
@@ -451,6 +453,7 @@ MainWindow::connectButtonReleased()
     connect(m_socket.data(), SIGNAL(connected()), this, SLOT(onSocketConnected()));
     connect(m_socket.data(), SIGNAL(readyRead()), this, SLOT(onSocketReadyRead()));
     connect(m_socket.data(), SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(onSocketError(QAbstractSocket::SocketError)));
+    m_shouldBeConnected = true;
     m_socket->connectToHost(host, port);
     m_connectButton->setText("Disconnect");
   }
@@ -598,7 +601,21 @@ MainWindow::onIncomingSoundData()
 void
 MainWindow::onSocketError(QAbstractSocket::SocketError /*socketError*/)
 {
+  static const int kReconnectIntervalMillis = 1000;
   m_logWindow->appendMessage(QString("socket error: %1").arg(m_socket->errorString()));
+  if (m_shouldBeConnected && m_socket)
+  {
+    // m_logWindow->appendMessage(QString("reconnecting in %1 milliseconds").arg(kReconnectIntervalMillis));
+    QTimer::singleShot(kReconnectIntervalMillis, this, SLOT(reconnectToHost()));
+  }
+}
+
+void
+MainWindow::reconnectToHost()
+{
+  quint16 port = static_cast<quint16>(m_serverPortLineEdit->text().toUInt());
+  QString host = m_serverAddressLineEdit->text();
+  m_socket->connectToHost(host, port);
 }
 
 void
