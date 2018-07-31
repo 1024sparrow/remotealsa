@@ -17,13 +17,13 @@
 static int capture_buffer_frames = 128;
 static snd_pcm_t* capture_handle = NULL;
 static uint32_t capture_sample_rate = 16000;
-static int capture_num_channels = 2;
+static int capture_num_channels = 1;
 static snd_output_t* alsa_log = NULL;
 
 static std::vector<uint8_t> capture_buffer;
 static snd_pcm_t* playback_handle = NULL;
 static uint32_t playback_sample_rate = 16000;
-static int playback_num_channels = 2;
+static int playback_num_channels = 1;
 static std::vector<uint8_t> playback_buffer;
 static int playback_buffer_size;
 static int playback_buffer_read;
@@ -268,6 +268,9 @@ int main(int argc, char* argv[])
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port = htons(port);
+
+  int enable = 1;
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
 
   err = bind(server_fd, reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr));
   if (err < 0)
