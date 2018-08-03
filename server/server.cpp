@@ -78,7 +78,7 @@ static void setup_capture(char const* capture_handle_name)
   capture_buffer.reserve(n);
   capture_buffer.resize(n);
 
-  LOG("capture setup sample_rate:%u channels:%d", capture_sample_rate, capture_num_channels);
+  snd_pcm_dump(capture_handle, alsa_log);
 }
 
 static void setup_playback(char const* playback_handle_name)
@@ -104,6 +104,8 @@ static void setup_playback(char const* playback_handle_name)
   playback_buffer.reserve(n);
   playback_buffer.resize(n);
   playback_buffer_size = n;
+
+  snd_pcm_dump(playback_handle, alsa_log);
 }
 
 static void timeval_subtract(timeval const& a, timeval const& b, timeval* result)
@@ -128,8 +130,6 @@ static void exception_handler(snd_pcm_t* h)
   snd_pcm_status_alloca(&status);
   D( snd_pcm_status(h, status) );
 
-  if (!alsa_log)
-    snd_output_stdio_attach(&alsa_log, stdout, 0);
   snd_pcm_status_dump(status, alsa_log);
 
   state = snd_pcm_status_get_state(status);
@@ -250,6 +250,7 @@ int main(int argc, char* argv[])
   }
 
   LOG("sound library:%s", snd_asoundlib_version());
+  snd_output_stdio_attach(&alsa_log, stdout, 0);
 
   if (capture_device)
     setup_capture(capture_device);
@@ -341,7 +342,9 @@ int main(int argc, char* argv[])
 
       if (capture_handle && FD_ISSET(client_fd, &write_fds))
       {
-        ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
+//        ssize_t n = write(client_fd, &capture_buffer[0], capture_buffer.size());
+        ssize_t n = send(client_fd, &capture_buffer[0], capture_buffer.size(), MSG_NOSIGNAL);
+
         if (n != static_cast<ssize_t>(capture_buffer.size()))
         {
           if (n == -1)
@@ -364,14 +367,12 @@ int main(int argc, char* argv[])
 
       if (FD_ISSET(client_fd, &read_fds))
       {
-        int bytes_to_read = (playback_buffer_size - playback_buffer_read);
-        int n = read(client_fd, &playback_buffer[0] + playback_buffer_read, bytes_to_read);
+        int n = read(client_fd, &playback_buffer[0], playback_buffer_size);
         if (n > 0)
         {
-          playback_buffer_read += n;
           if (playback_buffer_read == playback_buffer_size)
           {
-            snd_pcm_writei(playback_handle, &playback_buffer[0], playback_frames);
+            snd_pcm_writei(playback_handle, &playback_buffer[0], n/2);
           }
         }
       }
