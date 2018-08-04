@@ -26,8 +26,8 @@ static uint32_t playback_sample_rate = 16000;
 static int playback_num_channels = 1;
 static std::vector<uint8_t> playback_buffer;
 static int playback_buffer_size;
-static int playback_buffer_read;
-static snd_pcm_uframes_t playback_frames;
+static int playback_buffer_read = 0;
+static snd_pcm_uframes_t playback_frames = 1280;
 
 #define D(FUNC) if ((err = FUNC) < 0) {\
     printf("[%s:%d] -- %s (%d):%s\n", __FILE__, (__LINE__ ), #FUNC, err, snd_strerror(err)); \
@@ -86,7 +86,6 @@ static void setup_playback(char const* playback_handle_name)
   int err;
   uint32_t period_time;
   snd_pcm_hw_params_t* params;
-  snd_pcm_uframes_t playback_frames = 16;
 
   LOG("setup_playback with device:%s", playback_handle_name);
 
@@ -94,7 +93,7 @@ static void setup_playback(char const* playback_handle_name)
   snd_pcm_hw_params_alloca(&params);
   D( snd_pcm_hw_params_any(playback_handle, params) );
   D( snd_pcm_hw_params_set_access(playback_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED));
-//  D( snd_pcm_hw_params_get_period_size(params, &playback_frames, 0) );
+  D( snd_pcm_hw_params_set_period_size(playback_handle, params, playback_frames, 0) );
   D( snd_pcm_hw_params_set_format(playback_handle, params, SND_PCM_FORMAT_S16_LE) );
   D( snd_pcm_hw_params_set_channels(playback_handle, params, playback_num_channels) );
   D( snd_pcm_hw_params_set_rate_near(playback_handle, params, &playback_sample_rate, 0) );
@@ -192,6 +191,7 @@ int main(int argc, char* argv[])
   char const* capture_device = NULL;
   char const* playback_device = NULL;
   struct sockaddr_in server_addr = {0};
+  std::vector<char> buff;
 
 
   struct option long_options[] =
@@ -224,7 +224,7 @@ int main(int argc, char* argv[])
         capture_device = optarg;
         break;
       case 'd':
-        capture_num_channels = static_cast<int>(strtol(optarg, NULL, 10));
+        playback_num_channels = capture_num_channels = static_cast<int>(strtol(optarg, NULL, 10));
         break;
       case 'r':
         capture_sample_rate = static_cast<int>(strtol(optarg, NULL, 10));
@@ -241,6 +241,9 @@ int main(int argc, char* argv[])
         break;
     }
   }
+
+  buff.reserve(playback_frames);
+  buff.resize(playback_frames);
 
   if (port == -1)
   {
@@ -326,8 +329,8 @@ int main(int argc, char* argv[])
       FD_SET(client_fd, &err_fds);
 
       struct timeval timeout;
-      timeout.tv_sec = 1;
-      timeout.tv_usec = 0;
+      timeout.tv_sec = 0;
+      timeout.tv_usec = 10;
 
       int ret = select(client_fd + 1, &read_fds, &write_fds, &err_fds, &timeout);
       if (ret == 0)
@@ -367,13 +370,24 @@ int main(int argc, char* argv[])
 
       if (FD_ISSET(client_fd, &read_fds))
       {
-        int n = read(client_fd, &playback_buffer[0], playback_buffer_size);
+//        int n = read(client_fd, &playback_buffer[0], playback_buffer_size);
+        int n = read(client_fd, &buff[0], buff.capacity());
         if (n > 0)
         {
-          if (playback_buffer_read == playback_buffer_size)
-          {
-            snd_pcm_writei(playback_handle, &playback_buffer[0], n/2);
-          }
+          int bytes_per_frame = 2 * playback_num_channels;
+          int num_frames_to_write = n / bytes_per_frame;
+//          snd_pcm_writei(playback_handle, &playback_buffer[0], (n / bytes_per_frame));
+          err = snd_pcm_writei(playback_handle, &buff[0], num_frames_to_write);
+          if (err == -EPIPE)
+            exception_handler(playback_handle);
+          else if (err < 0)
+            LOG("snd_pcm_writei:%s", snd_strerror(err));
+          else if (err != num_frames_to_write)
+            LOG("short write wanted:%d got:%d", num_frames_to_write, err);
+        }
+        else if (n == -1)
+        {
+          LOG("read from socket failed. %s", strerror(errno));
         }
       }
     }
